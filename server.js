@@ -1,63 +1,55 @@
-import express from "express";
-import { chromium } from "playwright";
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import express from 'express';
+import bodyParser from 'body-parser';
+import { chromium } from 'playwright';
+
+const execAsync = promisify(exec);
+
+// Ensure Playwright's Chromium is installed at runtime
+async function ensureChromium() {
+  try {
+    const browser = await chromium.launch();
+    await browser.close();
+  } catch (e) {
+    console.log('Chromium not found, installing...');
+    await execAsync('npx playwright install chromium');
+  }
+}
+await ensureChromium();
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+app.use(bodyParser.json());
 
-app.use(express.json());
-
-app.get("/", (req, res) => {
-  res.send("✅ TCGPlayer Scraper is live!");
-});
-
-app.post("/scrape-price", async (req, res) => {
+app.post('/scrape-price', async (req, res) => {
   const { url } = req.body;
-
-  if (!url || !url.includes("tcgplayer.com/product")) {
-    return res.status(400).json({ error: "Invalid TCGPlayer URL" });
+  if (!url || !url.includes('tcgplayer.com/product')) {
+    return res.status(400).json({ error: 'Invalid TCGPlayer URL' });
   }
 
-  let browser;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-zygote",
-        "--disable-gpu"
-      ]
-    });
-
+    // Launch headless Chromium
+    const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
-      viewport: { width: 390, height: 844 }, // Mobile iPhone size
-      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.2 Mobile/15E148 Safari/604.1"
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X) ' +
+                 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.2 Mobile/15E148 Safari/604.1',
+      viewport: { width: 375, height: 667 }
     });
-
     const page = await context.newPage();
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.goto(url, { waitUntil: 'networkidle' });
 
-    await page.waitForSelector(".price-points__upper__price", { timeout: 15000 });
+    // Extract mobile view price
+    const selector = '.spotlight__price';
+    await page.waitForSelector(selector, { timeout: 10000 });
+    const price = await page.$eval(selector, el => el.textContent.trim());
 
-    const price = await page.$eval(".price-points__upper__price", el => el.textContent.trim());
-
-    if (!price) {
-      throw new Error("Could not find price on page");
-    }
-
+    await browser.close();
     res.json({ price });
   } catch (err) {
-    console.error("Scraper error:", err.message);
+    console.error('Scrape error:', err);
     res.status(500).json({ error: err.message });
-  } finally {
-    if (browser) {
-      await browser.close();
-    }
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
