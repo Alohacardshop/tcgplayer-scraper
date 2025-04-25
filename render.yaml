@@ -3,7 +3,5 @@ services:
     name: tcgplayer-scraper
     env: node
     plan: starter
-    buildCommand: |
-      npm install
-      npx playwright install chromium
+    buildCommand: npm install
     startCommand: npm start
