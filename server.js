@@ -1,42 +1,60 @@
-import express from "express";
-import { chromium } from "playwright";
+import express from 'express';
+import { chromium } from 'playwright';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.send("✅ TCGPlayer Scraper is live!");
-});
-
-app.post("/scrape-price", async (req, res) => {
+app.post('/scrape-price', async (req, res) => {
   const { url } = req.body;
-  if (!url || !url.includes("tcgplayer.com/product")) {
-    return res.status(400).json({ error: "Invalid TCGPlayer URL" });
+
+  if (!url || typeof url !== 'string') {
+    return res.status(400).json({ error: 'Missing or invalid URL' });
   }
 
   let browser;
   try {
     browser = await chromium.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
-    const context = await browser.newContext({
-      viewport: { width: 390, height: 844 },
-      userAgent:
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.2 Mobile/15E148 Safari/604.1"
+    const page = await browser.newPage();
+
+    await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
     });
-    const page = await context.newPage();
-    await page.goto(url, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(".price-points__upper__price", { timeout: 10000 });
-    const price = await page.$eval(".price-points__upper__price", el => el.textContent.trim());
-    res.json({ price });
+
+    // Wait for the price element to show up
+    await page.waitForSelector('.price-points__upper__price', { timeout: 10000 });
+
+    const priceEl = await page.$('.price-points__upper__price');
+    const price = await priceEl?.textContent();
+
+    if (!price) {
+      throw new Error('Price not found on page');
+    }
+
+    res.json({ price: price.trim() });
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Scrape error:', err.message || err);
+    res.status(500).json({
+      error: err.message || 'Failed to scrape price data',
+      details: 'Failed to scrape price data'
+    });
   } finally {
-    if (browser) await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 });
 
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.get('/', (req, res) => {
+  res.send('Price scraper is running!');
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
